@@ -16,3 +16,4 @@ venv/
 .idea/
 
 # Project specific (если нужно)
+logs/app.log
