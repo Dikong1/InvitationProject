@@ -42,7 +42,8 @@ app = FastAPI(
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    settings.FRONTEND_URL,
+    settings.FRONTEND_URL_VERCEL,
+    settings.FRONTEND_URL_HOSTING,
 ]
 
 app.add_middleware(
