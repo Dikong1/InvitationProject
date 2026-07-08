@@ -37,8 +37,10 @@ class Settings(BaseSettings):
 
     # App
     ENVIRONMENT: str = "development"
+    FRONTEND_URL: str = ""
     FRONTEND_VERCEL: str = "http://localhost:3000"
     FRONTEND_HOSTING: str = "https://www.invitation.kz/"
+    CORS_ORIGINS: str = ""
     MEDIA_BASE_URL: str = "/media"
 
 

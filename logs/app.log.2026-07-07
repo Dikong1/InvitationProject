@@ -1,0 +1,8 @@
+2026-03-01 02:02:42 | INFO     | invitation_app.auth | User registered: username=admin
+2026-03-01 02:04:24 | INFO     | invitation_app.auth | User logged in: username=admin
+2026-03-01 02:04:48 | INFO     | invitation_app.auth | User logged out: username=admin
+2026-03-01 02:04:59 | INFO     | invitation_app.auth | User logged in: username=admin
+2026-03-01 02:06:08 | INFO     | invitation_app.auth | User profile updated: username=admin
+2026-03-01 02:21:29 | INFO     | invitation_app.invitations | Invitation created: id=c2c0d7df-b3da-435d-bf6c-70f8d89a9549 slug=semya-akhmetovykh-wedding-2026 user=admin
+2026-03-01 02:26:01 | INFO     | httpx | HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-01 02:26:01 | INFO     | invitation_app.ai | AI text generated: category=wedding language=ru user=admin

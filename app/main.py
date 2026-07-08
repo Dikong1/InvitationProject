@@ -38,13 +38,30 @@ app = FastAPI(
 )
 
 # ─── CORS Middleware Configuration ──────────────────────────────────────────
-# Define the origins that are allowed to make cross-origin requests
-origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    settings.FRONTEND_VERCEL,
-    settings.FRONTEND_HOSTING,
-]
+def _normalize_origin(origin: str) -> str:
+    return origin.strip().rstrip("/")
+
+
+def _cors_origins() -> list[str]:
+    configured_origins = [
+        *settings.CORS_ORIGINS.split(","),
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        settings.FRONTEND_URL,
+        settings.FRONTEND_VERCEL,
+        settings.FRONTEND_HOSTING,
+    ]
+
+    origins: list[str] = []
+    for origin in configured_origins:
+        normalized = _normalize_origin(origin)
+        if normalized and normalized not in origins:
+            origins.append(normalized)
+    return origins
+
+
+# Define the origins that are allowed to make cross-origin requests.
+origins = _cors_origins()
 
 app.add_middleware(
     CORSMiddleware,
