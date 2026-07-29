@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     FRONTEND_HOSTING: str = "https://www.invitation.kz/"
     CORS_ORIGINS: str = ""
     MEDIA_BASE_URL: str = "/media"
+    TEMPLATE_PREVIEW_EXPIRE_MINUTES: int = 30
 
 
 settings = Settings()

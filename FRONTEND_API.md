@@ -1351,3 +1351,12 @@ fetch(`http://localhost:8000/api/v1/my/invitations/${invitationId}/media`, {
 | DELETE | `/api/v1/admin/templates/{id}` | Администратор | Удалить шаблон |
 | GET | `/api/v1/admin/users` | Администратор | Список пользователей |
 | POST | `/api/v1/admin/users/{id}/make-admin` | Администратор | Назначить администратором |
+# Template lifecycle reference
+
+The template API now supports draft/published/archived lifecycle state,
+immutable revisions, explicit publish, and short-lived constructor previews.
+See [docs/reference/admin_endpoints.md](docs/reference/admin_endpoints.md) and
+[docs/reference/public_endpoints.md](docs/reference/public_endpoints.md) for the
+current contract. The former preview-image upload route is now
+`POST /api/v1/admin/templates/{template_id}/preview-image`; the required
+`POST .../preview` route creates a temporary JSON preview session.

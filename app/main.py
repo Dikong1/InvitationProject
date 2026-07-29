@@ -17,13 +17,17 @@ Path(settings.TEMPLATES_DIR).mkdir(parents=True, exist_ok=True)
 # ─── Import routers ───────────────────────────────────────────────────────────
 from app.auth.router import router as auth_router
 from app.categories.router import router as categories_router
-from app.inv_templates.router import router as templates_router
+from app.inv_templates.router import (
+    preview_router as template_previews_router,
+    router as templates_router,
+)
 from app.invitations.router import router as invitations_router
 from app.rsvp.router import router as rsvp_router
 from app.media.router import router as media_router
 from app.payments.router import router as payments_router
 from app.ai.router import router as ai_router
 from app.admin.router import router as admin_router
+from app.inv_templates.admin_router import router as admin_templates_router
 
 # ─── App ─────────────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -80,11 +84,13 @@ app.mount("/media", StaticFiles(directory=str(media_root)), name="media")
 app.include_router(auth_router)           # /auth/*
 app.include_router(categories_router)     # /api/v1/categories
 app.include_router(templates_router)      # /api/v1/templates
+app.include_router(template_previews_router)  # /api/v1/template-previews
 app.include_router(invitations_router)    # /api/v1/my/invitations + /api/v1/invite/{slug}
 app.include_router(rsvp_router)           # /api/v1/invite/{slug}/rsvp + guests
 app.include_router(media_router)          # /api/v1/my/invitations/{id}/media
 app.include_router(payments_router)       # /api/v1/payment/*
 app.include_router(ai_router)             # /api/v1/ai/*
+app.include_router(admin_templates_router)  # /api/v1/admin/templates/*
 app.include_router(admin_router)          # /api/v1/admin/*
 
 

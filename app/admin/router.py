@@ -19,7 +19,9 @@ from app.payments.schemas import PaymentOut, PaymentPlanOut
 from app.categories.models import EventCategory
 from app.categories.schemas import CategoryCreate, CategoryUpdate, CategoryOut
 from app.inv_templates.models import InvitationTemplate
-from app.inv_templates.schemas import TemplateOut, TemplateUpdate
+from app.inv_templates.schemas import TemplateAdminOut, TemplateUpdate
+
+TemplateOut = TemplateAdminOut
 
 TEMPLATE_ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 TEMPLATE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -46,9 +48,12 @@ def _parse_template_config(config: Optional[str]) -> dict:
     if not config:
         return {}
     try:
-        return json.loads(config)
+        parsed = json.loads(config)
     except json.JSONDecodeError:
-        raise HTTPException(400, "Поле config должно быть валидным JSON")
+        raise HTTPException(422, "Поле config должно быть валидным JSON")
+    if not isinstance(parsed, dict):
+        raise HTTPException(422, "config must be a JSON object")
+    return parsed
 
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -232,7 +237,6 @@ async def delete_category(
 
 # ─── Template management ─────────────────────────────────────────────────────
 
-@router.post("/templates", response_model=TemplateOut, status_code=201)
 async def create_template(
     name_kk: str = Form(...),
     name_ru: str = Form(...),
@@ -272,7 +276,6 @@ async def create_template(
     return tpl
 
 
-@router.put("/templates/{template_id}", response_model=TemplateOut)
 async def update_template(
     template_id: uuid.UUID,
     data: TemplateUpdate,
@@ -296,7 +299,6 @@ async def update_template(
     return tpl
 
 
-@router.patch("/templates/{template_id}", response_model=TemplateOut)
 async def patch_template(
     template_id: uuid.UUID,
     name_kk: Optional[str] = Form(None),
@@ -359,7 +361,6 @@ async def patch_template(
     return tpl
 
 
-@router.delete("/templates/{template_id}", status_code=204)
 async def delete_template(
     template_id: uuid.UUID,
     admin: User = Depends(get_current_admin_user),
@@ -376,7 +377,7 @@ async def delete_template(
     logger.info("Template deleted: id=%s admin=%s", template_id, admin.username)
 
 
-@router.post("/templates/{template_id}/preview", response_model=TemplateOut)
+@router.post("/templates/{template_id}/preview-image", response_model=TemplateOut)
 async def upload_template_preview(
     template_id: uuid.UUID,
     file: UploadFile = File(...),
