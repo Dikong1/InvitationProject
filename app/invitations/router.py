@@ -265,4 +265,13 @@ async def get_public_invitation(slug: str, db: AsyncSession = Depends(get_db)):
     )
     result_inv.media = [m for m in media_result.scalars().all()]
 
+    # Attach the host's extra RSVP questions so guests can answer them
+    from app.rsvp.models import RSVPQuestion
+    questions_result = await db.execute(
+        select(RSVPQuestion)
+        .where(RSVPQuestion.invitation_id == inv.id)
+        .order_by(RSVPQuestion.sort_order)
+    )
+    result_inv.questions = list(questions_result.scalars().all())
+
     return result_inv

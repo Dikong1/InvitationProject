@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.rsvp.models import QuestionType
 
@@ -29,12 +29,15 @@ class RSVPQuestionCreate(BaseModel):
 
 
 class RSVPResponseCreate(BaseModel):
-    guest_name: str
-    guest_phone: Optional[str] = None
+    # Limits match the column sizes; guest_count is 0 when the guest declines
+    guest_name: str = Field(min_length=1, max_length=255)
+    guest_phone: Optional[str] = Field(default=None, max_length=20)
     will_attend: bool
-    guest_count: int = 1
-    message: Optional[str] = None
+    guest_count: int = Field(default=1, ge=0, le=20)
+    message: Optional[str] = Field(default=None, max_length=1000)
     answers: Optional[dict] = None
+
+    model_config = {"str_strip_whitespace": True}
 
 
 class RSVPResponseOut(BaseModel):
