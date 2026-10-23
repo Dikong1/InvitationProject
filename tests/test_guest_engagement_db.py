@@ -285,3 +285,36 @@ def test_guest_list_is_owner_only_and_capped():
         assert (await api.client.delete(f"{base}/{uuid.uuid4()}")).status_code == 404
 
     run(scenario)
+
+
+def test_activity_feed_lists_only_my_recent_responses():
+    async def scenario(api):
+        owner = await api.make_user("activity-host")
+        other = await api.make_user("activity-other")
+        mine = await api.published_invitation(owner, title="Менің тойым")
+        theirs = await api.published_invitation(other, title="Other party")
+
+        api.user = None
+        await api.client.post(f"/api/v1/invite/{mine['slug']}/rsvp", json={"guest_name": "Ерлан", "will_attend": False, "guest_count": 0})
+        await api.client.post(f"/api/v1/invite/{mine['slug']}/rsvp", json={
+            "guest_name": "Сәуле", "will_attend": True, "guest_count": 2, "message": "Құттықтаймын!", "wish_public": True,
+        })
+        await api.client.post(f"/api/v1/invite/{theirs['slug']}/rsvp", json={"guest_name": "Not mine", "will_attend": True})
+        await api.sql(
+            "UPDATE rsvp_responses SET responded_at = now() - interval '10 days' WHERE guest_name = 'Ерлан'"
+        )
+
+        api.user = owner
+        feed = (await api.client.get("/api/v1/my/activity")).json()
+        assert [(item["guest_name"], item["invitation_title"], item["wish_pending_approval"]) for item in feed] == [
+            ("Сәуле", "Менің тойым", True),
+        ]
+        older = (await api.client.get("/api/v1/my/activity", params={"since": "2000-01-01T00:00:00"})).json()
+        assert [item["guest_name"] for item in older] == ["Сәуле", "Ерлан"]
+        assert len((await api.client.get("/api/v1/my/activity", params={"since": "2000-01-01T00:00:00Z", "limit": 1})).json()) == 1
+        assert (await api.client.get("/api/v1/my/activity", params={"limit": 101})).status_code == 422
+
+        api.user = None
+        assert (await api.client.get("/api/v1/my/activity")).status_code == 401
+
+    run(scenario)

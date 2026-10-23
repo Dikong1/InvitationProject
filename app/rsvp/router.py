@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +14,7 @@ from app.invitations.models import Invitation, InvitationStatus
 from app.invitations.utils import get_owned_invitation
 from app.rsvp.models import Invitee, RSVPResponse, RSVPQuestion
 from app.rsvp.schemas import (
-    RSVPResponseCreate, RSVPResponseOut, RSVPResponseUpdate, RSVPSummary,
+    ActivityItemOut, RSVPResponseCreate, RSVPResponseOut, RSVPResponseUpdate, RSVPSummary,
     RSVPQuestionCreate, RSVPQuestionOut,
 )
 
@@ -21,6 +22,7 @@ router = APIRouter(tags=["rsvp"])
 logger = get_logger("rsvp")
 
 RATE_LIMIT_PER_HOUR = 5
+ACTIVITY_DEFAULT_DAYS = 7
 
 
 @router.post("/api/v1/invite/{slug}/rsvp", response_model=RSVPResponseOut)
@@ -211,6 +213,44 @@ async def update_guest_response(
         "approved" if data.wish_visible else "hidden", invitation_id, response_id, current_user.username,
     )
     return response
+
+
+@router.get("/api/v1/my/activity", response_model=List[ActivityItemOut])
+async def get_my_activity(
+    since: Optional[datetime] = Query(None, description="Только ответы позже этого времени (ISO 8601); по умолчанию 7 дней назад"),
+    limit: int = Query(50, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Latest guest responses across all of the current user's invitations, newest first."""
+    if since is None:
+        since = datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DEFAULT_DAYS)
+    elif since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+
+    result = await db.execute(
+        select(RSVPResponse, Invitation.title)
+        .join(Invitation, Invitation.id == RSVPResponse.invitation_id)
+        .where(
+            Invitation.user_id == current_user.id,
+            RSVPResponse.responded_at > since,
+        )
+        .order_by(RSVPResponse.responded_at.desc())
+        .limit(limit)
+    )
+    return [
+        ActivityItemOut(
+            response_id=response.id,
+            invitation_id=response.invitation_id,
+            invitation_title=title,
+            guest_name=response.guest_name,
+            will_attend=response.will_attend,
+            guest_count=response.guest_count,
+            wish_pending_approval=bool(response.wish_public and response.message and not response.wish_visible),
+            at=response.responded_at,
+        )
+        for response, title in result.all()
+    ]
 
 
 @router.get("/api/v1/my/invitations/{invitation_id}/questions", response_model=list[RSVPQuestionOut])

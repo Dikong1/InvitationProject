@@ -84,6 +84,18 @@ class RSVPSummary(BaseModel):
     responses: list[RSVPResponseOut]
 
 
+class ActivityItemOut(BaseModel):
+    """A guest's response across all of the host's invitations, for alerts."""
+    response_id: uuid.UUID
+    invitation_id: uuid.UUID
+    invitation_title: str
+    guest_name: str
+    will_attend: bool
+    guest_count: int
+    wish_pending_approval: bool  # Гость оставил публичное пожелание, ждущее одобрения
+    at: datetime  # Время ответа (обновляется, если гость изменил ответ)
+
+
 # ─── Invited guests ───────────────────────────────────────────────────────────
 
 class InviteeCreate(BaseModel):
