@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -236,7 +236,11 @@ async def delete_invitation(
 # ─── Public invitation page ───────────────────────────────────────────────────
 
 @router.get("/api/v1/invite/{slug}", response_model=InvitationPublicOut)
-async def get_public_invitation(slug: str, db: AsyncSession = Depends(get_db)):
+async def get_public_invitation(
+    slug: str,
+    g: Optional[str] = Query(None, max_length=32, description="Токен персональной ссылки гостя"),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(Invitation).where(Invitation.slug == slug))
     inv = result.scalar_one_or_none()
 
@@ -290,5 +294,16 @@ async def get_public_invitation(slug: str, db: AsyncSession = Depends(get_db)):
         .limit(PUBLIC_WISHES_LIMIT)
     )
     result_inv.wishes = list(wishes_result.scalars().all())
+
+    # Personal link: greet the invited guest by name. Unknown tokens are ignored.
+    if g:
+        from app.rsvp.models import Invitee
+        invitee_result = await db.execute(
+            select(Invitee).where(Invitee.invitation_id == inv.id, Invitee.token == g)
+        )
+        invitee = invitee_result.scalar_one_or_none()
+        if invitee:
+            from app.rsvp.schemas import InviteeGreeting
+            result_inv.invitee = InviteeGreeting(name=invitee.name)
 
     return result_inv

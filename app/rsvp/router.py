@@ -11,7 +11,7 @@ from app.auth.models import User
 from app.auth.config import get_current_user
 from app.invitations.models import Invitation, InvitationStatus
 from app.invitations.utils import get_owned_invitation
-from app.rsvp.models import RSVPResponse, RSVPQuestion
+from app.rsvp.models import Invitee, RSVPResponse, RSVPQuestion
 from app.rsvp.schemas import (
     RSVPResponseCreate, RSVPResponseOut, RSVPResponseUpdate, RSVPSummary,
     RSVPQuestionCreate, RSVPQuestionOut,
@@ -53,34 +53,60 @@ async def submit_rsvp(
             raise HTTPException(429, "Слишком много запросов. Попробуйте позже.")
 
     try:
-        # Phone-based deduplication — update existing response if phone matches
-        if data.guest_phone:
-            existing_result = await db.execute(
-                select(RSVPResponse).where(
-                    RSVPResponse.invitation_id == inv.id,
-                    RSVPResponse.guest_phone == data.guest_phone,
+        # Personal link: the guest is on the host's list
+        invitee = None
+        if data.invitee_token:
+            invitee_result = await db.execute(
+                select(Invitee).where(
+                    Invitee.invitation_id == inv.id,
+                    Invitee.token == data.invitee_token,
                 )
             )
+            invitee = invitee_result.scalar_one_or_none()
+            if not invitee:
+                logger.warning("RSVP with unknown invitee token: invitation=%s", slug)
+
+        # Deduplication: an invited guest's earlier response first, then the same phone.
+        # A phone match never takes over a response linked to a different invitee.
+        existing = None
+        if invitee:
+            existing_result = await db.execute(
+                select(RSVPResponse).where(RSVPResponse.invitee_id == invitee.id)
+            )
             existing = existing_result.scalar_one_or_none()
-            if existing:
-                # An edited or withdrawn wish needs the host's approval again
-                if existing.message != data.message or not data.wish_public:
-                    existing.wish_visible = False
-                existing.guest_name = data.guest_name
-                existing.will_attend = data.will_attend
-                existing.guest_count = data.guest_count
-                existing.message = data.message
-                existing.wish_public = data.wish_public
-                existing.answers = data.answers
-                existing.ip_address = ip_address
-                existing.responded_at = datetime.now(timezone.utc)
-                await db.commit()
-                await db.refresh(existing)
-                logger.info(
-                    "RSVP updated: invitation=%s guest=%s phone=%s",
-                    slug, data.guest_name, data.guest_phone,
-                )
-                return existing
+        if existing is None and data.guest_phone:
+            phone_query = select(RSVPResponse).where(
+                RSVPResponse.invitation_id == inv.id,
+                RSVPResponse.guest_phone == data.guest_phone,
+            )
+            if invitee:
+                phone_query = phone_query.where(RSVPResponse.invitee_id.is_(None))
+            existing_result = await db.execute(
+                phone_query.order_by(RSVPResponse.responded_at.desc()).limit(1)
+            )
+            existing = existing_result.scalar_one_or_none()
+
+        if existing:
+            # An edited or withdrawn wish needs the host's approval again
+            if existing.message != data.message or not data.wish_public:
+                existing.wish_visible = False
+            existing.guest_name = data.guest_name
+            existing.will_attend = data.will_attend
+            existing.guest_count = data.guest_count
+            existing.message = data.message
+            existing.wish_public = data.wish_public
+            existing.answers = data.answers
+            if invitee and existing.invitee_id is None:
+                existing.invitee_id = invitee.id
+            existing.ip_address = ip_address
+            existing.responded_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(existing)
+            logger.info(
+                "RSVP updated: invitation=%s guest=%s phone=%s",
+                slug, data.guest_name, data.guest_phone,
+            )
+            return existing
 
         response = RSVPResponse(
             invitation_id=inv.id,
@@ -92,6 +118,7 @@ async def submit_rsvp(
             answers=data.answers,
             wish_public=data.wish_public,
             wish_visible=False,
+            invitee_id=invitee.id if invitee else None,
             ip_address=ip_address,
         )
         db.add(response)
@@ -137,11 +164,19 @@ async def get_guests(
     not_attending = [r for r in responses if not r.will_attend]
     total_guests = sum(r.guest_count for r in attending)
 
+    invited_result = await db.execute(
+        select(func.count(Invitee.id)).where(Invitee.invitation_id == invitation_id)
+    )
+    invited_count = invited_result.scalar() or 0
+    responded_invitees = sum(1 for r in responses if r.invitee_id is not None)
+
     return RSVPSummary(
         total_responses=len(responses),
         attending=len(attending),
         not_attending=len(not_attending),
         total_guests=total_guests,
+        invited_count=invited_count,
+        pending=max(invited_count - responded_invitees, 0),
         responses=responses,
     )
 

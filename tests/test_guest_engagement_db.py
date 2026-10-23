@@ -212,3 +212,76 @@ def test_only_the_owner_can_moderate_wishes():
         assert (await api.client.patch(f"/api/v1/my/invitations/{invitation['id']}/guests/{uuid.uuid4()}", json={"wish_visible": True})).status_code == 404
 
     run(scenario)
+
+
+def test_guest_list_personal_links_and_pending_counts():
+    async def scenario(api):
+        owner = await api.make_user("invitees-host")
+        invitation = await api.published_invitation(owner)
+        slug, inv_id = invitation["slug"], invitation["id"]
+        base = f"/api/v1/my/invitations/{inv_id}/invitees"
+
+        created = await api.client.post(base, json={"invitees": [
+            {"name": "  Айгерім  ", "phone": "+77010000010"},
+            {"name": "Арман"},
+            {"name": "Дана"},
+        ]})
+        assert created.status_code == 201, created.text
+        guests = {g["name"]: g for g in created.json()}
+        assert set(guests) == {"Айгерім", "Арман", "Дана"}
+        assert all(len(g["token"]) == 12 and not g["responded"] for g in guests.values())
+        assert len({g["token"] for g in guests.values()}) == 3
+
+        api.user = None
+        greeted = await api.client.get(f"/api/v1/invite/{slug}", params={"g": guests["Арман"]["token"]})
+        assert greeted.json()["invitee"] == {"name": "Арман"}
+        unknown = await api.client.get(f"/api/v1/invite/{slug}", params={"g": "not-a-token"})
+        assert unknown.status_code == 200 and unknown.json()["invitee"] is None
+
+        rsvp = f"/api/v1/invite/{slug}/rsvp"
+        first = await api.client.post(rsvp, json={"guest_name": "Арман", "will_attend": True, "invitee_token": guests["Арман"]["token"]})
+        # Same link again, even without a phone, updates the same response
+        again = await api.client.post(rsvp, json={"guest_name": "Арман С.", "will_attend": False, "guest_count": 0, "invitee_token": guests["Арман"]["token"]})
+        assert first.json()["id"] == again.json()["id"] and again.json()["invitee_id"] == guests["Арман"]["id"]
+        # An earlier phone-only answer gets linked when the guest later uses their link
+        phone_only = await api.client.post(rsvp, json={"guest_name": "Айгерім", "guest_phone": "+77010000010", "will_attend": True})
+        linked = await api.client.post(rsvp, json={"guest_name": "Айгерім", "guest_phone": "+77010000010", "will_attend": True, "invitee_token": guests["Айгерім"]["token"]})
+        assert phone_only.json()["invitee_id"] is None
+        assert linked.json()["id"] == phone_only.json()["id"] and linked.json()["invitee_id"] == guests["Айгерім"]["id"]
+
+        api.user = owner
+        summary = (await api.client.get(f"/api/v1/my/invitations/{inv_id}/guests")).json()
+        assert (summary["invited_count"], summary["pending"], summary["total_responses"]) == (3, 1, 2)
+        listed = {g["name"]: g for g in (await api.client.get(base)).json()}
+        assert (listed["Арман"]["responded"], listed["Арман"]["will_attend"]) == (True, False)
+        assert listed["Дана"]["responded"] is False
+
+        # Removing a guest keeps their answer but drops them from the list
+        assert (await api.client.delete(f"{base}/{guests['Арман']['id']}")).status_code == 204
+        summary = (await api.client.get(f"/api/v1/my/invitations/{inv_id}/guests")).json()
+        assert (summary["invited_count"], summary["pending"], summary["total_responses"]) == (2, 1, 2)
+
+    run(scenario)
+
+
+def test_guest_list_is_owner_only_and_capped():
+    async def scenario(api):
+        owner = await api.make_user("cap-host")
+        stranger = await api.make_user("cap-stranger")
+        invitation = await api.published_invitation(owner)
+        base = f"/api/v1/my/invitations/{invitation['id']}/invitees"
+
+        api.user = stranger
+        assert (await api.client.get(base)).status_code == 404
+        assert (await api.client.post(base, json={"invitees": [{"name": "X"}]})).status_code == 404
+
+        api.user = owner
+        assert (await api.client.post(base, json={"invitees": []})).status_code == 422
+        assert (await api.client.post(base, json={"invitees": [{"name": "X"}] * 201})).status_code == 422
+        for _ in range(5):
+            assert (await api.client.post(base, json={"invitees": [{"name": "Guest"}] * 200})).status_code == 201
+        full = await api.client.post(base, json={"invitees": [{"name": "One too many"}]})
+        assert full.status_code == 400
+        assert (await api.client.delete(f"{base}/{uuid.uuid4()}")).status_code == 404
+
+    run(scenario)
