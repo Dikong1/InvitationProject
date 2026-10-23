@@ -14,7 +14,7 @@ from app.categories.models import EventCategory  # noqa: F401
 from app.inv_templates.models import InvitationTemplate  # noqa: F401
 from app.invitations.models import Invitation, InvitationDetails  # noqa: F401
 from app.media.models import InvitationMedia  # noqa: F401
-from app.rsvp.models import RSVPQuestion, RSVPResponse  # noqa: F401
+from app.rsvp.models import Invitee, RSVPQuestion, RSVPResponse  # noqa: F401
 from app.payments.models import PaymentPlan, Payment  # noqa: F401
 
 config = context.config

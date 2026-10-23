@@ -89,8 +89,8 @@ app/
 | GET | `/api/v1/categories` | — | List event categories |
 | GET | `/api/v1/templates` | — | List active templates (filter: `?category=slug`) |
 | GET | `/api/v1/templates/{id}` | — | Single template |
-| GET | `/api/v1/invite/{slug}` | — | Public invitation page (404 if not paid/published) |
-| POST | `/api/v1/invite/{slug}/rsvp` | — | Submit RSVP (dedup by phone) |
+| GET | `/api/v1/invite/{slug}` | — | Public invitation page (404 if not paid/published); includes `questions`, approved `wishes`, and `invitee` when `?g=<token>` matches |
+| POST | `/api/v1/invite/{slug}/rsvp` | — | Submit RSVP (dedup by invitee token, then phone; `wish_public`, `invitee_token`) |
 
 ### My invitations (`/api/v1/my/*`)
 | Method | Path | Auth | Description |
@@ -100,7 +100,12 @@ app/
 | GET | `/api/v1/my/invitations/{id}` | required | Get one |
 | PUT | `/api/v1/my/invitations/{id}` | required | Full update (403 after editable_until) |
 | DELETE | `/api/v1/my/invitations/{id}` | required | Delete |
-| GET | `/api/v1/my/invitations/{id}/guests` | required | List RSVP responses |
+| GET | `/api/v1/my/invitations/{id}/guests` | required | RSVP summary + responses (`invited_count`, `pending`) |
+| PATCH | `/api/v1/my/invitations/{id}/guests/{rid}` | required | Approve/hide a guest's wish (`wish_visible`) |
+| GET | `/api/v1/my/invitations/{id}/invitees` | required | Guest list with personal link tokens and response status |
+| POST | `/api/v1/my/invitations/{id}/invitees` | required | Add 1–200 guests (max 1000 per invitation) |
+| DELETE | `/api/v1/my/invitations/{id}/invitees/{iid}` | required | Remove a guest (their RSVP is kept, unlinked) |
+| GET | `/api/v1/my/activity` | required | Recent RSVPs across own invitations (`since`, `limit`) |
 | GET | `/api/v1/my/invitations/{id}/questions` | required | List RSVP questions |
 | POST | `/api/v1/my/invitations/{id}/questions` | required | Add RSVP question |
 | DELETE | `/api/v1/my/invitations/{id}/questions/{qid}` | required | Delete question |
@@ -118,7 +123,7 @@ app/
 ### AI (`/api/v1/ai/*`)
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/api/v1/ai/generate-text` | required | Generate invitation text via Groq |
+| POST | `/api/v1/ai/generate-text` | required | Generate invitation text via Groq (`tone`, `variants` 1–3 → `texts`) |
 
 ### Admin (`/api/v1/admin/*`) — `is_admin=True` required
 | Method | Path | Description |
@@ -164,9 +169,10 @@ app/
 ### InvitationMedia
 `id (UUID)`, `invitation_id`, `media_type (photo/video)`, `url`, `thumbnail_url`, `caption`, `display_style (rectangle/square/circle)`, `sort_order`, `created_at`
 
-### RSVPQuestion / RSVPResponse
-Questions: `id`, `invitation_id`, `question_text`, `question_type (text/yes_no/choice)`, `options (JSONB)`, `is_required`
-Responses: `id`, `invitation_id`, `guest_name`, `guest_phone`, `attending`, `answers (JSONB)`, `ip_address`, `created_at`
+### RSVPQuestion / RSVPResponse / Invitee
+Questions: `id`, `invitation_id`, `question_text_kk`, `question_text_ru`, `question_type (boolean/number/text/select)`, `options (JSONB)`, `is_required`, `sort_order`
+Responses: `id`, `invitation_id`, `invitee_id (FK rsvp_invitees, SET NULL; unique when set)`, `guest_name`, `guest_phone`, `will_attend`, `guest_count`, `message`, `answers (JSONB)`, `wish_public`, `wish_visible`, `ip_address`, `responded_at`
+Invitees (`rsvp_invitees`): `id`, `invitation_id`, `name`, `phone`, `token (12 chars, unique)`, `created_at`
 
 ### EventCategory
 `id`, `name_kk`, `name_ru`, `slug`, `icon`, `sort_order`, `is_active`, `created_by_id`, `updated_by_id`, `created_at`
@@ -180,6 +186,9 @@ Responses: `id`, `invitation_id`, `guest_name`, `guest_phone`, `attending`, `ans
 - RSVP dedup: same `guest_phone` = update existing response (no Redis)
 - RSVP rate limit: max 5 per IP per hour (DB count query, no Redis)
 - Login lockout: 5 failed attempts → 30-minute lock stored in DB
+- Wishes: shown on the public page only when the guest sent `wish_public=true` AND the host approved (`wish_visible`); editing the message or withdrawing consent clears approval
+- Invitees: personal link `/invite/{slug}?g={token}`; tokens are stored in plain text (hosts re-copy links; a token only reveals the guest's name); max 1000 per invitation
+- RSVP input limits: `guest_name` 1–255, `guest_phone` ≤ 20, `guest_count` 0–20 (0 for declines), `message` ≤ 1000
 - Payment flow: user creates payment → manually transfers via Kaspi app → admin confirms → invitation published, `is_paid=True`, `expires_at` set from plan
 
 ---
@@ -230,6 +239,9 @@ PAYMENT_KASPI_PHONE=+77001234567
 | `936c8932f68d` | after lock features |
 | `d3e4f5g6h7i8` | add audit fields (created_by_id, updated_by_id) |
 | `f5g6h7i8j9k0` | add description, images to templates; make preview_url nullable |
+| `g6h7i8j9k0l1` | template lifecycle, revisions, preview sessions |
+| `h7i8j9k0l1m2` | RSVP wishes: `wish_public`, `wish_visible` |
+| `i8j9k0l1m2n3` | `rsvp_invitees` + `rsvp_responses.invitee_id` |
 
 ---
 

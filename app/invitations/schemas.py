@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime, date
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel
 
 from app.invitations.models import InvitationStatus
+from app.rsvp.schemas import InviteeGreeting, RSVPQuestionOut, WishOut
 
 
 # ─── InvitationDetails ────────────────────────────────────────────────────────
@@ -95,5 +96,8 @@ class InvitationPublicOut(BaseModel):
     expires_at: Optional[datetime] = None
     details: Optional[InvitationDetailsOut] = None
     media: list[MediaOutBasic] = []
+    questions: List[RSVPQuestionOut] = []  # Дополнительные RSVP-вопросы организатора
+    wishes: List[WishOut] = []  # Пожелания гостей, одобренные организатором
+    invitee: Optional[InviteeGreeting] = None  # Гость по персональной ссылке (?g=...), для приветствия по имени
 
     model_config = {"from_attributes": True}

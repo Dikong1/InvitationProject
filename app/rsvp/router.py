@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,9 +11,10 @@ from app.logging_config import get_logger
 from app.auth.models import User
 from app.auth.config import get_current_user
 from app.invitations.models import Invitation, InvitationStatus
-from app.rsvp.models import RSVPResponse, RSVPQuestion
+from app.invitations.utils import get_owned_invitation
+from app.rsvp.models import Invitee, RSVPResponse, RSVPQuestion
 from app.rsvp.schemas import (
-    RSVPResponseCreate, RSVPResponseOut, RSVPSummary,
+    ActivityItemOut, RSVPResponseCreate, RSVPResponseOut, RSVPResponseUpdate, RSVPSummary,
     RSVPQuestionCreate, RSVPQuestionOut,
 )
 
@@ -20,6 +22,7 @@ router = APIRouter(tags=["rsvp"])
 logger = get_logger("rsvp")
 
 RATE_LIMIT_PER_HOUR = 5
+ACTIVITY_DEFAULT_DAYS = 7
 
 
 @router.post("/api/v1/invite/{slug}/rsvp", response_model=RSVPResponseOut)
@@ -52,30 +55,60 @@ async def submit_rsvp(
             raise HTTPException(429, "Слишком много запросов. Попробуйте позже.")
 
     try:
-        # Phone-based deduplication — update existing response if phone matches
-        if data.guest_phone:
-            existing_result = await db.execute(
-                select(RSVPResponse).where(
-                    RSVPResponse.invitation_id == inv.id,
-                    RSVPResponse.guest_phone == data.guest_phone,
+        # Personal link: the guest is on the host's list
+        invitee = None
+        if data.invitee_token:
+            invitee_result = await db.execute(
+                select(Invitee).where(
+                    Invitee.invitation_id == inv.id,
+                    Invitee.token == data.invitee_token,
                 )
             )
+            invitee = invitee_result.scalar_one_or_none()
+            if not invitee:
+                logger.warning("RSVP with unknown invitee token: invitation=%s", slug)
+
+        # Deduplication: an invited guest's earlier response first, then the same phone.
+        # A phone match never takes over a response linked to a different invitee.
+        existing = None
+        if invitee:
+            existing_result = await db.execute(
+                select(RSVPResponse).where(RSVPResponse.invitee_id == invitee.id)
+            )
             existing = existing_result.scalar_one_or_none()
-            if existing:
-                existing.guest_name = data.guest_name
-                existing.will_attend = data.will_attend
-                existing.guest_count = data.guest_count
-                existing.message = data.message
-                existing.answers = data.answers
-                existing.ip_address = ip_address
-                existing.responded_at = datetime.now(timezone.utc)
-                await db.commit()
-                await db.refresh(existing)
-                logger.info(
-                    "RSVP updated: invitation=%s guest=%s phone=%s",
-                    slug, data.guest_name, data.guest_phone,
-                )
-                return existing
+        if existing is None and data.guest_phone:
+            phone_query = select(RSVPResponse).where(
+                RSVPResponse.invitation_id == inv.id,
+                RSVPResponse.guest_phone == data.guest_phone,
+            )
+            if invitee:
+                phone_query = phone_query.where(RSVPResponse.invitee_id.is_(None))
+            existing_result = await db.execute(
+                phone_query.order_by(RSVPResponse.responded_at.desc()).limit(1)
+            )
+            existing = existing_result.scalar_one_or_none()
+
+        if existing:
+            # An edited or withdrawn wish needs the host's approval again
+            if existing.message != data.message or not data.wish_public:
+                existing.wish_visible = False
+            existing.guest_name = data.guest_name
+            existing.will_attend = data.will_attend
+            existing.guest_count = data.guest_count
+            existing.message = data.message
+            existing.wish_public = data.wish_public
+            existing.answers = data.answers
+            if invitee and existing.invitee_id is None:
+                existing.invitee_id = invitee.id
+            existing.ip_address = ip_address
+            existing.responded_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(existing)
+            logger.info(
+                "RSVP updated: invitation=%s guest=%s phone=%s",
+                slug, data.guest_name, data.guest_phone,
+            )
+            return existing
 
         response = RSVPResponse(
             invitation_id=inv.id,
@@ -85,6 +118,9 @@ async def submit_rsvp(
             guest_count=data.guest_count,
             message=data.message,
             answers=data.answers,
+            wish_public=data.wish_public,
+            wish_visible=False,
+            invitee_id=invitee.id if invitee else None,
             ip_address=ip_address,
         )
         db.add(response)
@@ -130,13 +166,91 @@ async def get_guests(
     not_attending = [r for r in responses if not r.will_attend]
     total_guests = sum(r.guest_count for r in attending)
 
+    invited_result = await db.execute(
+        select(func.count(Invitee.id)).where(Invitee.invitation_id == invitation_id)
+    )
+    invited_count = invited_result.scalar() or 0
+    responded_invitees = sum(1 for r in responses if r.invitee_id is not None)
+
     return RSVPSummary(
         total_responses=len(responses),
         attending=len(attending),
         not_attending=len(not_attending),
         total_guests=total_guests,
+        invited_count=invited_count,
+        pending=max(invited_count - responded_invitees, 0),
         responses=responses,
     )
+
+
+@router.patch("/api/v1/my/invitations/{invitation_id}/guests/{response_id}", response_model=RSVPResponseOut)
+async def update_guest_response(
+    invitation_id: uuid.UUID,
+    response_id: uuid.UUID,
+    data: RSVPResponseUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve or hide a guest's wish on the public wishes wall (owner only)."""
+    await get_owned_invitation(invitation_id, current_user, db)
+    result = await db.execute(
+        select(RSVPResponse).where(
+            RSVPResponse.id == response_id,
+            RSVPResponse.invitation_id == invitation_id,
+        )
+    )
+    response = result.scalar_one_or_none()
+    if not response:
+        raise HTTPException(404, "Ответ не найден")
+    if data.wish_visible and not (response.wish_public and response.message):
+        raise HTTPException(400, "Гость не разрешил показывать это сообщение")
+
+    response.wish_visible = data.wish_visible
+    await db.commit()
+    await db.refresh(response)
+    logger.info(
+        "Wish %s: invitation=%s response=%s user=%s",
+        "approved" if data.wish_visible else "hidden", invitation_id, response_id, current_user.username,
+    )
+    return response
+
+
+@router.get("/api/v1/my/activity", response_model=List[ActivityItemOut])
+async def get_my_activity(
+    since: Optional[datetime] = Query(None, description="Только ответы позже этого времени (ISO 8601); по умолчанию 7 дней назад"),
+    limit: int = Query(50, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Latest guest responses across all of the current user's invitations, newest first."""
+    if since is None:
+        since = datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DEFAULT_DAYS)
+    elif since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+
+    result = await db.execute(
+        select(RSVPResponse, Invitation.title)
+        .join(Invitation, Invitation.id == RSVPResponse.invitation_id)
+        .where(
+            Invitation.user_id == current_user.id,
+            RSVPResponse.responded_at > since,
+        )
+        .order_by(RSVPResponse.responded_at.desc())
+        .limit(limit)
+    )
+    return [
+        ActivityItemOut(
+            response_id=response.id,
+            invitation_id=response.invitation_id,
+            invitation_title=title,
+            guest_name=response.guest_name,
+            will_attend=response.will_attend,
+            guest_count=response.guest_count,
+            wish_pending_approval=bool(response.wish_public and response.message and not response.wish_visible),
+            at=response.responded_at,
+        )
+        for response, title in result.all()
+    ]
 
 
 @router.get("/api/v1/my/invitations/{invitation_id}/questions", response_model=list[RSVPQuestionOut])

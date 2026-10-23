@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Integer, Boolean, Text, ForeignKey, DateTime, func, Enum as SAEnum
+from sqlalchemy import String, Integer, Boolean, Text, ForeignKey, DateTime, func, Enum as SAEnum, Index, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,8 +40,39 @@ class RSVPQuestion(Base):
         return f"<RSVPQuestion id={self.id}>"
 
 
+class Invitee(Base):
+    """A guest the host invited by name; their personal link carries `token`."""
+    __tablename__ = "rsvp_invitees"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )  # Уникальный идентификатор приглашённого гостя (UUID)
+    invitation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invitations.id", ondelete="CASCADE"),
+        nullable=False, index=True
+    )  # Приглашение, в список гостей которого входит этот гость
+    name: Mapped[str] = mapped_column(String(255), nullable=False)  # Имя гостя, как его записал организатор (для приветствия)
+    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # Телефон гостя (необязательно)
+    token: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)  # Токен персональной ссылки (?g=...); хранится открыто, чтобы организатор мог снова скопировать ссылку
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )  # Дата и время добавления гостя
+
+    def __repr__(self) -> str:
+        return f"<Invitee id={self.id} name={self.name}>"
+
+
 class RSVPResponse(Base):
     __tablename__ = "rsvp_responses"
+    __table_args__ = (
+        # One response per invited guest; responses without a personal link are unaffected
+        Index(
+            "uq_rsvp_responses_invitee_id", "invitee_id",
+            unique=True, postgresql_where=text("invitee_id IS NOT NULL"),
+        ),
+        # Public wishes wall lookup
+        Index("ix_rsvp_responses_invitation_wish_visible", "invitation_id", "wish_visible"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -56,6 +87,11 @@ class RSVPResponse(Base):
     guest_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)  # Количество человек, которых гость приведёт с собой
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Пожелание или личный комментарий от гостя
     answers: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Ответы на дополнительные RSVP-вопросы в формате {question_id: ответ}
+    invitee_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rsvp_invitees.id", ondelete="SET NULL"), nullable=True
+    )  # Приглашённый гость, ответивший по персональной ссылке (если есть)
+    wish_public: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)  # Гость разрешил показать пожелание на странице приглашения
+    wish_visible: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)  # Организатор одобрил пожелание для показа (сбрасывается при изменении текста)
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)  # IP-адрес гостя (используется для ограничения: не более 5 ответов с одного IP в час)
     responded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

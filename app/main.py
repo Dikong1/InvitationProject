@@ -23,6 +23,7 @@ from app.inv_templates.router import (
 )
 from app.invitations.router import router as invitations_router
 from app.rsvp.router import router as rsvp_router
+from app.rsvp.invitees_router import router as invitees_router
 from app.media.router import router as media_router
 from app.payments.router import router as payments_router
 from app.ai.router import router as ai_router
@@ -87,6 +88,7 @@ app.include_router(templates_router)      # /api/v1/templates
 app.include_router(template_previews_router)  # /api/v1/template-previews
 app.include_router(invitations_router)    # /api/v1/my/invitations + /api/v1/invite/{slug}
 app.include_router(rsvp_router)           # /api/v1/invite/{slug}/rsvp + guests
+app.include_router(invitees_router)       # /api/v1/my/invitations/{id}/invitees
 app.include_router(media_router)          # /api/v1/my/invitations/{id}/media
 app.include_router(payments_router)       # /api/v1/payment/*
 app.include_router(ai_router)             # /api/v1/ai/*

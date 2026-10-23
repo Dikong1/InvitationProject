@@ -1,8 +1,9 @@
-from typing import Optional
+import asyncio
+from typing import List, Literal, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.logging_config import get_logger
@@ -29,6 +30,17 @@ _CATEGORY_NAMES = {
 }
 
 
+_TONE_STYLES = {
+    "formal": "строгим, официальным и уважительным стилем",
+    "warm": "тёплым, душевным и искренним стилем",
+    "fun": "лёгким и весёлым стилем, с доброй шуткой",
+    "poetic": "поэтичным, образным стилем, можно с короткими стихотворными строками",
+}
+_DEFAULT_STYLE = "тёплым и торжественным стилем"
+
+Tone = Literal["formal", "warm", "fun", "poetic"]
+
+
 class GenerateTextRequest(BaseModel):
     category: str = "wedding"
     organizer_name: str
@@ -37,18 +49,22 @@ class GenerateTextRequest(BaseModel):
     venue_name: Optional[str] = None
     language: str = "ru"
     custom_fields: Optional[dict] = None
+    tone: Optional[Tone] = None  # Стиль текста; без значения — тёплый и торжественный
+    variants: int = Field(1, ge=1, le=3)  # Сколько вариантов текста сгенерировать
 
 
 class GenerateTextResponse(BaseModel):
-    text: str
+    text: str  # Первый вариант (для обратной совместимости)
+    texts: List[str] = []  # Все варианты, если запрошено несколько
 
 
 def _build_prompt(data: GenerateTextRequest) -> str:
     lang_name = _LANGUAGE_NAMES.get(data.language, "русском")
     category_name = _CATEGORY_NAMES.get(data.category, "Мероприятие")
 
+    solemn = "торжественный " if data.tone in (None, "formal") else ""
     parts = [
-        f"Создай торжественный текст приглашения на {lang_name} языке.",
+        f"Создай {solemn}текст приглашения на {lang_name} языке.",
         f"Тип мероприятия: {category_name}.",
         f"Организатор: {data.organizer_name}.",
     ]
@@ -64,12 +80,28 @@ def _build_prompt(data: GenerateTextRequest) -> str:
         for k, v in data.custom_fields.items():
             parts.append(f"{k}: {v}.")
 
+    style = _TONE_STYLES.get(data.tone or "", _DEFAULT_STYLE)
     parts.append(
-        "Напиши текст 3-4 абзаца, тёплым и торжественным стилем, "
+        f"Напиши текст 3-4 абзаца, {style}, "
         "с учётом казахских культурных традиций. "
         "Без технических деталей и форматирования — только текст приглашения."
     )
     return " ".join(parts)
+
+
+async def _generate_once(client: httpx.AsyncClient, payload: dict) -> str:
+    """One Groq chat completion; Groq only supports n=1, so variants call this in parallel."""
+    response = await client.post(
+        GROQ_API_URL,
+        json=payload,
+        headers={
+            "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        },
+    )
+    response.raise_for_status()
+    result = response.json()
+    return result["choices"][0]["message"]["content"].strip()
 
 
 @router.post("/generate-text", response_model=GenerateTextResponse)
@@ -95,29 +127,22 @@ async def generate_invitation_text(
             },
             {"role": "user", "content": prompt},
         ],
-        "temperature": 0.8,
+        # Slightly more variety when the host asked for alternatives
+        "temperature": 0.8 if data.variants == 1 else 0.95,
         "max_tokens": 600,
     }
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                GROQ_API_URL,
-                json=payload,
-                headers={
-                    "Authorization": f"Bearer {settings.GROQ_API_KEY}",
-                    "Content-Type": "application/json",
-                },
+            texts = await asyncio.gather(
+                *(_generate_once(client, payload) for _ in range(data.variants))
             )
-            response.raise_for_status()
-            result = response.json()
-            text = result["choices"][0]["message"]["content"].strip()
 
         logger.info(
-            "AI text generated: category=%s language=%s user=%s",
-            data.category, data.language, current_user.username,
+            "AI text generated: category=%s language=%s tone=%s variants=%s user=%s",
+            data.category, data.language, data.tone, data.variants, current_user.username,
         )
-        return GenerateTextResponse(text=text)
+        return GenerateTextResponse(text=texts[0], texts=list(texts))
 
     except httpx.HTTPStatusError as e:
         logger.error("Groq API HTTP error: %s %s", e.response.status_code, e.response.text)
