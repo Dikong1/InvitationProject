@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Public invitation responses include the host's RSVP `questions`, approved
+  guest `wishes`, and an `invitee` greeting when opened with a personal
+  link (`?g=<token>`).
+- Wishes wall: guests can opt in with `wish_public`; hosts approve or hide
+  each wish via `PATCH /api/v1/my/invitations/{id}/guests/{response_id}`.
+- Guest list with personal links:
+  `GET/POST/DELETE /api/v1/my/invitations/{id}/invitees`. RSVPs sent with
+  `invitee_token` are linked to the guest, and the guests summary reports
+  `invited_count` and `pending`.
+- Activity feed of recent RSVPs across a user's invitations:
+  `GET /api/v1/my/activity`.
+- AI text generation accepts `tone` and `variants` (1–3) and returns
+  `texts` alongside `text`.
+- Migrations `h7i8j9k0l1m2` (wishes) and `i8j9k0l1m2n3` (invitees).
+- Database-backed API tests, run when `TEST_DATABASE_URL` is set.
+
+### Changed
+
+- RSVP input is validated against the column limits (`guest_name` 1–255,
+  `guest_phone` ≤ 20, `guest_count` 0–20, `message` ≤ 1000) and stripped.
+
 ## [1.1.0] - 2026-07-29: 0725c5f7641d716962ec5a352c53762b415d0c67
 
 ### Added
