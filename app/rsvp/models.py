@@ -56,6 +56,8 @@ class RSVPResponse(Base):
     guest_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)  # Количество человек, которых гость приведёт с собой
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Пожелание или личный комментарий от гостя
     answers: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Ответы на дополнительные RSVP-вопросы в формате {question_id: ответ}
+    wish_public: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)  # Гость разрешил показать пожелание на странице приглашения
+    wish_visible: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)  # Организатор одобрил пожелание для показа (сбрасывается при изменении текста)
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)  # IP-адрес гостя (используется для ограничения: не более 5 ответов с одного IP в час)
     responded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

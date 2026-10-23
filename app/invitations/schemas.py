@@ -5,7 +5,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from app.invitations.models import InvitationStatus
-from app.rsvp.schemas import RSVPQuestionOut
+from app.rsvp.schemas import RSVPQuestionOut, WishOut
 
 
 # ─── InvitationDetails ────────────────────────────────────────────────────────
@@ -97,5 +97,6 @@ class InvitationPublicOut(BaseModel):
     details: Optional[InvitationDetailsOut] = None
     media: list[MediaOutBasic] = []
     questions: List[RSVPQuestionOut] = []  # Дополнительные RSVP-вопросы организатора
+    wishes: List[WishOut] = []  # Пожелания гостей, одобренные организатором
 
     model_config = {"from_attributes": True}

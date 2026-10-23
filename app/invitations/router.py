@@ -22,6 +22,7 @@ router = APIRouter(tags=["invitations"])
 logger = get_logger("invitations")
 
 EDITABLE_DAYS = 3
+PUBLIC_WISHES_LIMIT = 50
 
 
 async def _get_own_invitation(
@@ -273,5 +274,21 @@ async def get_public_invitation(slug: str, db: AsyncSession = Depends(get_db)):
         .order_by(RSVPQuestion.sort_order)
     )
     result_inv.questions = list(questions_result.scalars().all())
+
+    # Wishes the guest made public and the host approved, newest first
+    from app.rsvp.models import RSVPResponse
+    wishes_result = await db.execute(
+        select(RSVPResponse)
+        .where(
+            RSVPResponse.invitation_id == inv.id,
+            RSVPResponse.wish_public.is_(True),
+            RSVPResponse.wish_visible.is_(True),
+            RSVPResponse.message.isnot(None),
+            RSVPResponse.message != "",
+        )
+        .order_by(RSVPResponse.responded_at.desc())
+        .limit(PUBLIC_WISHES_LIMIT)
+    )
+    result_inv.wishes = list(wishes_result.scalars().all())
 
     return result_inv

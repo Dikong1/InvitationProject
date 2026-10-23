@@ -36,6 +36,7 @@ class RSVPResponseCreate(BaseModel):
     guest_count: int = Field(default=1, ge=0, le=20)
     message: Optional[str] = Field(default=None, max_length=1000)
     answers: Optional[dict] = None
+    wish_public: bool = False  # Гость разрешает показать сообщение на странице (после одобрения организатором)
 
     model_config = {"str_strip_whitespace": True}
 
@@ -49,6 +50,23 @@ class RSVPResponseOut(BaseModel):
     guest_count: int
     message: Optional[str] = None
     answers: Optional[dict] = None
+    wish_public: bool = False
+    wish_visible: bool = False
+    responded_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RSVPResponseUpdate(BaseModel):
+    """Owner moderation of a guest's response."""
+    wish_visible: bool
+
+
+class WishOut(BaseModel):
+    """A guest's message approved for the public wishes wall."""
+    id: uuid.UUID
+    guest_name: str
+    message: str
     responded_at: datetime
 
     model_config = {"from_attributes": True}

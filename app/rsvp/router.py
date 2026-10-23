@@ -10,9 +10,10 @@ from app.logging_config import get_logger
 from app.auth.models import User
 from app.auth.config import get_current_user
 from app.invitations.models import Invitation, InvitationStatus
+from app.invitations.utils import get_owned_invitation
 from app.rsvp.models import RSVPResponse, RSVPQuestion
 from app.rsvp.schemas import (
-    RSVPResponseCreate, RSVPResponseOut, RSVPSummary,
+    RSVPResponseCreate, RSVPResponseOut, RSVPResponseUpdate, RSVPSummary,
     RSVPQuestionCreate, RSVPQuestionOut,
 )
 
@@ -62,10 +63,14 @@ async def submit_rsvp(
             )
             existing = existing_result.scalar_one_or_none()
             if existing:
+                # An edited or withdrawn wish needs the host's approval again
+                if existing.message != data.message or not data.wish_public:
+                    existing.wish_visible = False
                 existing.guest_name = data.guest_name
                 existing.will_attend = data.will_attend
                 existing.guest_count = data.guest_count
                 existing.message = data.message
+                existing.wish_public = data.wish_public
                 existing.answers = data.answers
                 existing.ip_address = ip_address
                 existing.responded_at = datetime.now(timezone.utc)
@@ -85,6 +90,8 @@ async def submit_rsvp(
             guest_count=data.guest_count,
             message=data.message,
             answers=data.answers,
+            wish_public=data.wish_public,
+            wish_visible=False,
             ip_address=ip_address,
         )
         db.add(response)
@@ -137,6 +144,38 @@ async def get_guests(
         total_guests=total_guests,
         responses=responses,
     )
+
+
+@router.patch("/api/v1/my/invitations/{invitation_id}/guests/{response_id}", response_model=RSVPResponseOut)
+async def update_guest_response(
+    invitation_id: uuid.UUID,
+    response_id: uuid.UUID,
+    data: RSVPResponseUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve or hide a guest's wish on the public wishes wall (owner only)."""
+    await get_owned_invitation(invitation_id, current_user, db)
+    result = await db.execute(
+        select(RSVPResponse).where(
+            RSVPResponse.id == response_id,
+            RSVPResponse.invitation_id == invitation_id,
+        )
+    )
+    response = result.scalar_one_or_none()
+    if not response:
+        raise HTTPException(404, "Ответ не найден")
+    if data.wish_visible and not (response.wish_public and response.message):
+        raise HTTPException(400, "Гость не разрешил показывать это сообщение")
+
+    response.wish_visible = data.wish_visible
+    await db.commit()
+    await db.refresh(response)
+    logger.info(
+        "Wish %s: invitation=%s response=%s user=%s",
+        "approved" if data.wish_visible else "hidden", invitation_id, response_id, current_user.username,
+    )
+    return response
 
 
 @router.get("/api/v1/my/invitations/{invitation_id}/questions", response_model=list[RSVPQuestionOut])

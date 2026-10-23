@@ -146,3 +146,69 @@ def test_rsvp_accepts_declines_with_zero_guests_and_rejects_oversized_input():
             assert response.status_code == 422, body
 
     run(scenario)
+
+
+def test_wishes_need_guest_consent_and_host_approval_and_reset_when_edited():
+    async def scenario(api):
+        owner = await api.make_user("wishes-host")
+        invitation = await api.published_invitation(owner)
+        slug, inv_id = invitation["slug"], invitation["id"]
+
+        api.user = None
+        public = await api.client.post(f"/api/v1/invite/{slug}/rsvp", json={
+            "guest_name": "Айгерім", "guest_phone": "+77010000001", "will_attend": True,
+            "message": "Бақытты болыңдар!", "wish_public": True,
+        })
+        private = await api.client.post(f"/api/v1/invite/{slug}/rsvp", json={
+            "guest_name": "Арман", "will_attend": True, "message": "Only for the host",
+        })
+        assert public.status_code == private.status_code == 200
+        assert public.json()["wish_public"] is True and public.json()["wish_visible"] is False
+
+        page = await api.client.get(f"/api/v1/invite/{slug}")
+        assert page.json()["wishes"] == []
+
+        api.user = owner
+        moderation = f"/api/v1/my/invitations/{inv_id}/guests"
+        refused = await api.client.patch(f"{moderation}/{private.json()['id']}", json={"wish_visible": True})
+        assert refused.status_code == 400
+        approved = await api.client.patch(f"{moderation}/{public.json()['id']}", json={"wish_visible": True})
+        assert approved.status_code == 200 and approved.json()["wish_visible"] is True
+
+        api.user = None
+        wishes = (await api.client.get(f"/api/v1/invite/{slug}")).json()["wishes"]
+        assert [(w["guest_name"], w["message"]) for w in wishes] == [("Айгерім", "Бақытты болыңдар!")]
+        assert set(wishes[0]) == {"id", "guest_name", "message", "responded_at"}
+
+        # Same phone, same text: approval is kept. New text: back to pending.
+        same = await api.client.post(f"/api/v1/invite/{slug}/rsvp", json={
+            "guest_name": "Айгерім", "guest_phone": "+77010000001", "will_attend": True,
+            "guest_count": 2, "message": "Бақытты болыңдар!", "wish_public": True,
+        })
+        assert same.json()["wish_visible"] is True
+        edited = await api.client.post(f"/api/v1/invite/{slug}/rsvp", json={
+            "guest_name": "Айгерім", "guest_phone": "+77010000001", "will_attend": True,
+            "message": "Жаңа тілек", "wish_public": True,
+        })
+        assert edited.json()["wish_visible"] is False
+        assert (await api.client.get(f"/api/v1/invite/{slug}")).json()["wishes"] == []
+
+    run(scenario)
+
+
+def test_only_the_owner_can_moderate_wishes():
+    async def scenario(api):
+        owner = await api.make_user("moderation-owner")
+        stranger = await api.make_user("moderation-stranger")
+        invitation = await api.published_invitation(owner)
+        api.user = None
+        response = await api.client.post(f"/api/v1/invite/{invitation['slug']}/rsvp", json={
+            "guest_name": "Guest", "will_attend": True, "message": "Hi", "wish_public": True,
+        })
+        api.user = stranger
+        url = f"/api/v1/my/invitations/{invitation['id']}/guests/{response.json()['id']}"
+        assert (await api.client.patch(url, json={"wish_visible": True})).status_code == 404
+        api.user = owner
+        assert (await api.client.patch(f"/api/v1/my/invitations/{invitation['id']}/guests/{uuid.uuid4()}", json={"wish_visible": True})).status_code == 404
+
+    run(scenario)
