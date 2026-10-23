@@ -70,6 +70,8 @@ class RSVPResponse(Base):
             "uq_rsvp_responses_invitee_id", "invitee_id",
             unique=True, postgresql_where=text("invitee_id IS NOT NULL"),
         ),
+        # Public wishes wall lookup
+        Index("ix_rsvp_responses_invitation_wish_visible", "invitation_id", "wish_visible"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
