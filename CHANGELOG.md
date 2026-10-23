@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-23: 16874d381492d60ac61a661bb72f87269eb4d6da
+
 ### Added
 
 - Public invitation responses include the host's RSVP `questions`, approved
