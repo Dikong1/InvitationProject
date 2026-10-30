@@ -23,6 +23,9 @@ httpx>=0.27.0
 # Image processing (thumbnails)
 Pillow>=10.0.0
 
+# Object storage for uploads (S3-compatible, Cloudflare R2 in production)
+boto3>=1.34
+
 # Async file I/O
 aiofiles>=23.0.0
 

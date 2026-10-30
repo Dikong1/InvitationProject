@@ -15,24 +15,13 @@ from app.auth.config import get_current_user
 from app.invitations.models import Invitation
 from app.media.models import InvitationMedia, MediaType, DisplayStyle
 from app.media.schemas import MediaOut
+from app.storage import get_storage
 
 router = APIRouter(tags=["media"])
 logger = get_logger("media")
 
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_FILE_BYTES = settings.MAX_FILE_SIZE_MB * 1024 * 1024
-
-
-def _get_media_dir(invitation_id: uuid.UUID) -> Path:
-    p = Path(settings.MEDIA_DIR) / str(invitation_id)
-    p.mkdir(parents=True, exist_ok=True)
-    return p
-
-
-def _get_thumb_dir(invitation_id: uuid.UUID) -> Path:
-    p = Path(settings.MEDIA_THUMBS_DIR) / str(invitation_id)
-    p.mkdir(parents=True, exist_ok=True)
-    return p
 
 
 async def _count_media(invitation_id: uuid.UUID, db: AsyncSession) -> int:
@@ -45,17 +34,18 @@ async def _count_media(invitation_id: uuid.UUID, db: AsyncSession) -> int:
     return result.scalar() or 0
 
 
-def _save_thumbnail(src_path: Path, thumb_dir: Path, filename: str) -> str:
-    """Generate a 300x300 thumbnail using Pillow. Returns thumb filename."""
+def _make_thumbnail(contents: bytes) -> Optional[bytes]:
+    """A 300x300 thumbnail in the original format, or None if Pillow cannot read the image."""
     try:
         from PIL import Image  # type: ignore
-        with Image.open(src_path) as img:
+        with Image.open(io.BytesIO(contents)) as img:
+            fmt = img.format or "JPEG"
             img.thumbnail((300, 300))
-            thumb_path = thumb_dir / filename
-            img.save(thumb_path, optimize=True, quality=85)
-        return filename
+            out = io.BytesIO()
+            img.save(out, format=fmt, optimize=True, quality=85)
+        return out.getvalue()
     except Exception:
-        return ""
+        return None
 
 
 @router.post("/api/v1/my/invitations/{invitation_id}/media", response_model=MediaOut, status_code=201)
@@ -114,18 +104,14 @@ async def upload_media(
         file_uuid = str(uuid.uuid4())
         filename = f"{file_uuid}{ext}"
 
-        media_dir = _get_media_dir(invitation_id)
-        file_path = media_dir / filename
-        file_path.write_bytes(contents)
+        storage = get_storage()
+        content_type = file.content_type or "application/octet-stream"
+        relative_url = await storage.save(f"uploads/{invitation_id}/{filename}", contents, content_type)
 
-        # Generate thumbnail
-        thumb_dir = _get_thumb_dir(invitation_id)
-        thumb_filename = _save_thumbnail(file_path, thumb_dir, filename)
-
-        relative_url = f"{settings.MEDIA_BASE_URL}/uploads/{invitation_id}/{filename}"
+        thumbnail = _make_thumbnail(contents)
         thumb_url = (
-            f"{settings.MEDIA_BASE_URL}/thumbs/{invitation_id}/{thumb_filename}"
-            if thumb_filename
+            await storage.save(f"thumbs/{invitation_id}/{filename}", thumbnail, content_type)
+            if thumbnail
             else relative_url
         )
 
@@ -204,16 +190,13 @@ async def delete_media(
     if not media:
         raise HTTPException(404, "Файл не найден")
 
-    # Delete physical files
+    # Delete the stored files
     try:
-        inv_dir = Path(settings.MEDIA_DIR) / str(invitation_id)
-        thumb_dir = Path(settings.MEDIA_THUMBS_DIR) / str(invitation_id)
-        filename = Path(media.url).name
-        for target in [inv_dir / filename, thumb_dir / filename]:
-            if target.exists():
-                target.unlink()
+        storage = get_storage()
+        for url in {media.url, media.thumbnail_url}:
+            await storage.delete(url)
     except Exception as e:
-        logger.warning("Could not delete file on disk: %s", e)
+        logger.warning("Could not delete media files: %s", e)
 
     await db.delete(media)
     await db.commit()

@@ -14,6 +14,10 @@ Path(settings.MEDIA_DIR).mkdir(parents=True, exist_ok=True)
 Path(settings.MEDIA_THUMBS_DIR).mkdir(parents=True, exist_ok=True)
 Path(settings.TEMPLATES_DIR).mkdir(parents=True, exist_ok=True)
 
+# ─── File storage: fail at startup, not on the first upload, if it is misconfigured ─
+from app.storage import get_storage
+get_storage()
+
 # ─── Import routers ───────────────────────────────────────────────────────────
 from app.auth.router import router as auth_router
 from app.categories.router import router as categories_router

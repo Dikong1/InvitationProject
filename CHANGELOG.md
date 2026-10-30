@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Production served the 1.2.0 code without its migrations, so every
+  published invitation page and the guests, guest list and activity
+  endpoints returned 500. `start.sh` (the Render start command) now runs
+  `alembic upgrade head` before uvicorn.
+- Uploaded photos, thumbnails and template images disappeared after each
+  Render deploy or restart, because they lived on the container's
+  ephemeral disk. Uploads now go through `app/storage.py`, which can store
+  them in an S3-compatible bucket (Cloudflare R2) with
+  `STORAGE_BACKEND=s3`. Local disk stays the default for development.
+
+### Added
+
+- Settings `STORAGE_BACKEND`, `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`,
+  `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_REGION`, `S3_PUBLIC_BASE_URL`.
+  The app fails at startup when `s3` is selected but incomplete.
+- Dependency `boto3`.
+
 ## [1.2.0] - 2026-10-23: 16874d381492d60ac61a661bb72f87269eb4d6da
 
 ### Added
