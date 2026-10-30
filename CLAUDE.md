@@ -195,6 +195,8 @@ Invitees (`rsvp_invitees`): `id`, `invitation_id`, `name`, `phone`, `token (12 c
 
 ## File storage
 
+- Uploads go through `app/storage.py` (`get_storage().save(key, data, content_type)` → URL stored in the DB). `STORAGE_BACKEND=local` (default) writes the folders below; `STORAGE_BACKEND=s3` writes to an S3-compatible bucket (Cloudflare R2 in production) and stores absolute public URLs. Render's disk is ephemeral, so production must use `s3`.
+- Render start command: `bash start.sh` (runs `alembic upgrade head`, then uvicorn).
 - User media: `media/uploads/{invitation_id}/{uuid}.ext` served at `/media/uploads/...`
 - Thumbnails: `media/thumbs/{invitation_id}/{uuid}.ext` served at `/media/thumbs/...`
 - Template images: `media/templates/{uuid}.ext` served at `/media/templates/...`
@@ -215,6 +217,13 @@ FRONTEND_VERCEL=http://localhost:3000
 FRONTEND_HOSTING=https://www.invitation.kz/
 CORS_ORIGINS=
 PAYMENT_KASPI_PHONE=+77001234567
+# Production file storage (Cloudflare R2)
+STORAGE_BACKEND=s3
+S3_ENDPOINT_URL=https://<account_id>.r2.cloudflarestorage.com
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+S3_BUCKET=invitely-media
+S3_PUBLIC_BASE_URL=https://pub-<id>.r2.dev
 ```
 
 ---

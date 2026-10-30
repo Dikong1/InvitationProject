@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.database import get_db
 from app.logging_config import get_logger
 from app.auth.models import User
@@ -20,6 +19,7 @@ from app.categories.models import EventCategory
 from app.categories.schemas import CategoryCreate, CategoryUpdate, CategoryOut
 from app.inv_templates.models import InvitationTemplate
 from app.inv_templates.schemas import TemplateAdminOut, TemplateUpdate
+from app.storage import get_storage
 
 TemplateOut = TemplateAdminOut
 
@@ -27,12 +27,10 @@ TEMPLATE_ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 TEMPLATE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
-def _save_template_file(contents: bytes, original_filename: str) -> str:
+async def _save_template_file(contents: bytes, original_filename: str, content_type: str) -> str:
     ext = Path(original_filename or "image.jpg").suffix.lower() or ".jpg"
     filename = f"{uuid.uuid4()}{ext}"
-    dest = Path(settings.TEMPLATES_DIR) / filename
-    dest.write_bytes(contents)
-    return f"{settings.MEDIA_BASE_URL}/templates/{filename}"
+    return await get_storage().save(f"templates/{filename}", contents, content_type)
 
 
 async def _validate_and_save_upload(file: UploadFile) -> str:
@@ -41,7 +39,7 @@ async def _validate_and_save_upload(file: UploadFile) -> str:
     contents = await file.read()
     if len(contents) > TEMPLATE_MAX_BYTES:
         raise HTTPException(400, "Файл слишком большой. Максимум 10 МБ")
-    return _save_template_file(contents, file.filename or "image.jpg")
+    return await _save_template_file(contents, file.filename or "image.jpg", file.content_type)
 
 
 def _parse_template_config(config: Optional[str]) -> dict:
@@ -451,12 +449,9 @@ async def delete_template_image(
     await db.commit()
     await db.refresh(tpl)
 
-    # Delete physical file
+    # Delete the stored file
     try:
-        filename = Path(removed_url).name
-        target = Path(settings.TEMPLATES_DIR) / filename
-        if target.exists():
-            target.unlink()
+        await get_storage().delete(removed_url)
     except Exception as e:
         logger.warning("Could not delete template image file: %s", e)
 

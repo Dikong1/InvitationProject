@@ -27,7 +27,16 @@ class Settings(BaseSettings):
     PAYMENT_KASPI_PHONE: str = "+77001234567"
     PAYMENT_DESCRIPTION: str = "Оплата за публикацию приглашения"
 
-    # File storage (local)
+    # File storage: "local" (folders below, dev only) or "s3" (S3-compatible bucket, e.g. Cloudflare R2)
+    STORAGE_BACKEND: str = "local"
+    S3_ENDPOINT_URL: str = ""  # R2: https://<account_id>.r2.cloudflarestorage.com
+    S3_ACCESS_KEY_ID: str = ""
+    S3_SECRET_ACCESS_KEY: str = ""
+    S3_BUCKET: str = ""
+    S3_REGION: str = "auto"
+    S3_PUBLIC_BASE_URL: str = ""  # public bucket URL, e.g. https://media.invitation.kz or https://pub-<id>.r2.dev
+
+    # Local file storage
     MEDIA_DIR: str = "media/uploads"
     MEDIA_THUMBS_DIR: str = "media/thumbs"
     TEMPLATES_DIR: str = "media/templates"
